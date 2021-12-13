@@ -1,11 +1,8 @@
 import enum
 from typing import List, Tuple
 
-from matplotlib.pyplot import cla
 import numpy as np
 import copy
-
-from input_generator import *
 
 class SuperGeometryType(enum.Enum):
     TRIANGLE = 3

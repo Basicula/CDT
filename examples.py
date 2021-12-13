@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 from typing import List
 import numpy as np
 
+from input_generator import *
 from delaunay_triangulation import *
 
 def render_polygon_points(points : List[List[float]], axis):
