@@ -19,6 +19,7 @@ class CDT:
     Constraint Delaunay triangulation algorithm
     '''
     triangle_edge_ids = [(0, 1), (1, 2), (2, 0)]
+    epsilon = 3.1401849173675501458728246904e-16
 
     def __init__(self):
         self.points = []
@@ -27,7 +28,10 @@ class CDT:
         self.triangles = []
         self.constraints = []
         self.constraints_segments = []
-        self.neighbors = {}
+        self.neighbors = []
+        # debug options
+        self.draw_each_step = False
+        self.store_steps = False
 
     def add_points(self, points : List[List[float]]) -> None:
         '''
@@ -104,14 +108,21 @@ class CDT:
         if len(self.points) < 3:
             return
         self.triangles = []
-        self.neighbors = {}
+        self.neighbors = []
+        self.__append_step("Start")
         self.__normalize_input()
-        self.__add_super_geometry(SuperGeometryType.TRIANGLE)
+        self.__append_step("Input normalized")
+        self.__add_super_geometry(SuperGeometryType.SQUARE)
+        self.__append_step("Super geometry added")
         self.__add_points_to_triangulation()
+        self.__append_step("All points added")
         self.__process_constraints()
+        self.__append_step("Constraints processed")
         self.__mark_inner_outer_triangles()
         self.__remove_outer_triangles()
+        self.__append_step("Outer triangles removed")
         self.__remove_super_geometry()
+        self.__append_step("Super geometry removed")
 
     def __append_step(self, step_name : str = "Undefined") -> None:
         '''
@@ -120,7 +131,26 @@ class CDT:
         step_name - str, optional
             The name of the step
         '''
+        if not self.store_steps:
+            return
         self.steps.append([copy.deepcopy(self.points), copy.deepcopy(self.triangles), step_name])
+        if self.draw_each_step:
+            import matplotlib.pyplot as plt
+            print(step_name)
+            points = np.array(self.points)
+            plt.scatter(points[:,0], points[:, 1], c='r')
+            for triangle in self.triangles:
+                triangle_points = np.array([points[triangle[0]], points[triangle[1]], points[triangle[2]], points[triangle[0]]])
+                lengths = [
+                    np.linalg.norm(triangle_points[0] - triangle_points[1]), 
+                    np.linalg.norm(triangle_points[1] - triangle_points[2]), 
+                    np.linalg.norm(triangle_points[2] - triangle_points[0])
+                ]
+                lengths.sort()
+                if lengths[0] + lengths[1] - lengths[2] == 0:
+                    print(triangle, triangle_points)
+                plt.plot(triangle_points[:,0], triangle_points[:,1], c='k')
+            plt.show()
 
     def __check_segment_intersection(self, segment1 : List[List[int]], segment2 : List[List[int]]) -> bool:
         '''
@@ -165,6 +195,7 @@ class CDT:
                             break
                 if not segment_present:
                     triangles_to_check = self.__add_segment_to_triangulation(segment)
+                    self.__append_step("After constraint segment adding to triangulation")
                     self.__check_circumcircles(triangles_to_check)
 
     def __traverse_segment(self, segment : List[List[int]]) -> Tuple[List[int], List[int], List[int]]:
@@ -190,18 +221,19 @@ class CDT:
             if segment[1] in curr_triangle:
                 right_region.append(segment[1])
                 left_region.append(segment[1])
+                triangle_to_remove.append(curr_triangle_id)
                 break
             for triangle_edge_id in self.triangle_edge_ids:
                 triangle_edge = [curr_triangle[triangle_edge_id[0]], curr_triangle[triangle_edge_id[1]]]
                 if self.__check_segment_intersection(segment, triangle_edge):
-                    triangle_to_remove.append(curr_triangle_id)
                     next_triangle_id = self.neighbors[curr_triangle_id][triangle_edge_id[0]]
-                    if next_triangle_id in triangle_to_remove:
+                    if len(triangle_to_remove) > 0 and next_triangle_id == triangle_to_remove[-1]:
                         continue
+                    triangle_to_remove.append(curr_triangle_id)
                     triangles_to_check.append(next_triangle_id)
-                    if not triangle_edge[0] in right_region:
+                    if triangle_edge[0] != right_region[-1]:
                         right_region.append(triangle_edge[0])
-                    if not triangle_edge[1] in left_region:
+                    if triangle_edge[1] != left_region[-1]:
                         left_region.append(triangle_edge[1])
                     break
         return triangle_to_remove, left_region, right_region
@@ -219,7 +251,8 @@ class CDT:
 
         for triangle_to_remove_id in triangle_to_remove:
             self.triangles[triangle_to_remove_id] = [0, 0, 0]
-
+            self.__append_step("After removing triangle that is interscted with constraint segment")
+            
         triangles_to_check = []
         for region in [left_region, right_region]:
             point_id = 1
@@ -237,16 +270,20 @@ class CDT:
                         [region[point_id - 1], region[point_id + 1], region[point_id]],
                         triangle_id
                     )
+                    self.__append_step("After inserting triangle while segment insertion")
                     if triangle_id == -1:
                         triangle_id = len(self.triangles) - 1
                     triangles_to_check.append(triangle_id)
                     region.pop(point_id)
                     point_id = 1
-        
+
         if len(triangle_to_remove) > 0:
             triangle_to_remove.sort()
             for triangle_id in reversed(triangle_to_remove):
                 self.__remove_triangle(triangle_id)
+                for i in range(len(triangles_to_check)):
+                    if triangles_to_check[i] >= triangle_id:
+                        triangles_to_check[i] -= 1
 
         return triangles_to_check
 
@@ -274,11 +311,14 @@ class CDT:
             triangles_to_check = []
             if point_location == PointLocation.ON_EDGE:
                 triangles_to_check = self.__split_edge(triangle_id, point_id)
+                self.__append_step(f"After splitting edge while inserting point {point_id}")
 
             if point_location == PointLocation.INSIDE:
                 triangles_to_check = self.__split_triangle(triangle_id, point_id)
-
+                self.__append_step(f"After splitting triangle while inserting point {point_id}")
+            
             self.__check_circumcircles(triangles_to_check)
+            self.__append_step("After circumcircles check")
             break
 
     def __check_circumcircles(self, triangles_to_check : List[int]) -> None:
@@ -299,39 +339,47 @@ class CDT:
                 opposite_point_id = neighbor_triangle[(neighbor_triangle_edge_id + 2) % 3]
                 if not self.__is_in_circumcircle(triangle_id, opposite_point_id):
                     continue
-
+                
+                pending = []
                 for new_to_check in self.neighbors[neighbor_triangle_id]:
                     if new_to_check != triangle_id and new_to_check != None:
-                        triangles_to_check.append(new_to_check)
+                        pending.append(new_to_check)
 
-                self.__flip_edge(triangle_id, neighbor_triangle_id, triangle_edge_id, neighbor_triangle_edge_id)
+                if not self.__flip_edge(triangle_id, neighbor_triangle_id, triangle_edge_id, neighbor_triangle_edge_id):
+                    pending = []
+                for new_to_check in pending:
+                    triangles_to_check.append(new_to_check)
+                self.__append_step("After edge flip")
 
-    def __flip_edge(self, triangle_id : int, neighbor_id : int, triangle_edge_id : int, neighbor_edge_id : int) -> None:
+    def __flip_edge(self, first_triangle_id : int, second_triangle_id : int, first_triangle_edge_id : int, second_triangle_edge_id : int) -> bool:
         '''
         Flips edge for pair of triangles that shares its edge
 
-        triangle_id - int, required
+        Returns True if edge flipped, otherwise returns False
+
+        first_triangle_id - int, required
             The first triangle
-        neighbor_id - int, required
+        second_triangle_id - int, required
             The second triangle that is neighbor of the first triangle
-        triangle_edge_id - int, required
+        first_triangle_edge_id - int, required
             The edge id (0, 1 or 2) that is shared in first triangle
-        neighbor_edge_id - int, required
+        second_triangle_edge_id - int, required
             The edge id (0, 1 or 2) that is shared in second triangle
         '''
-        triangle = self.triangles[triangle_id]
-        if self.__is_constraint_segment([triangle[triangle_edge_id], triangle[(triangle_edge_id + 1) % 3]]):
-            return
-        triangle_point_id = (triangle_edge_id + 2) % 3
-        opposite_point_id = (neighbor_edge_id + 2) % 3
-        self.triangles[triangle_id][triangle_edge_id] = self.triangles[neighbor_id][opposite_point_id]
-        self.triangles[neighbor_id][neighbor_edge_id] = self.triangles[triangle_id][triangle_point_id]
-        self.neighbors[neighbor_id][neighbor_edge_id] = self.neighbors[triangle_id][triangle_point_id]
-        self.__update_neighbors(self.neighbors[triangle_id][triangle_point_id], triangle_id, neighbor_id)
-        self.neighbors[triangle_id][triangle_point_id] = neighbor_id
-        self.neighbors[triangle_id][triangle_edge_id] = self.neighbors[neighbor_id][opposite_point_id]
-        self.__update_neighbors(self.neighbors[neighbor_id][opposite_point_id], neighbor_id, triangle_id)
-        self.neighbors[neighbor_id][opposite_point_id] = triangle_id
+        triangle = self.triangles[first_triangle_id]
+        if self.__is_constraint_segment([triangle[first_triangle_edge_id], triangle[(first_triangle_edge_id + 1) % 3]]):
+            return False
+        first_point_id = (first_triangle_edge_id + 2) % 3
+        second_point_id = (second_triangle_edge_id + 2) % 3
+        self.triangles[first_triangle_id][first_triangle_edge_id] = self.triangles[second_triangle_id][second_point_id]
+        self.triangles[second_triangle_id][second_triangle_edge_id] = self.triangles[first_triangle_id][first_point_id]
+        self.neighbors[second_triangle_id][second_triangle_edge_id] = self.neighbors[first_triangle_id][first_point_id]
+        self.__update_neighbors(self.neighbors[first_triangle_id][first_point_id], first_triangle_id, second_triangle_id)
+        self.neighbors[first_triangle_id][first_point_id] = second_triangle_id
+        self.neighbors[first_triangle_id][first_triangle_edge_id] = self.neighbors[second_triangle_id][second_point_id]
+        self.__update_neighbors(self.neighbors[second_triangle_id][second_point_id], second_triangle_id, first_triangle_id)
+        self.neighbors[second_triangle_id][second_point_id] = first_triangle_id
+        return True
 
     def __is_constraint_segment(self, triangle_segment : List[int]) -> bool:
         '''
@@ -368,7 +416,7 @@ class CDT:
         ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d
         uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d
         r_sqr = (ax - ux) * (ax - ux) + (ay - uy) * (ay - uy)
-        return (point[0] - ux) * (point[0] - ux) + (point[1] - uy) * (point[1] - uy) <= r_sqr
+        return (point[0] - ux) * (point[0] - ux) + (point[1] - uy) * (point[1] - uy) < r_sqr
 
     def __split_edge(self, triangle_id : int, point_id : int) -> List[int]:
         '''
@@ -390,7 +438,7 @@ class CDT:
         for triangle_edge in self.triangle_edge_ids:
             a = np.array(self.points[triangle[triangle_edge[0]]])
             b = np.array(self.points[triangle[triangle_edge[1]]])
-            if np.linalg.norm(a - b) == np.linalg.norm(point - a) + np.linalg.norm(point - b):
+            if np.cross(b - a, point - a) < self.epsilon:
                 edge_id = triangle_edge[0]
                 break
         
@@ -407,7 +455,7 @@ class CDT:
         self.__update_neighbors(self.neighbors[triangle_id][triangle_opposite_point_id], triangle_id, t1_id)
         self.triangles[triangle_id][edge_id] = point_id
         self.neighbors[triangle_id][triangle_opposite_point_id] = t1_id
-        self.neighbors[t1_id] = t1_adj
+        self.neighbors.append(t1_adj)
         self.triangles.append(t1)
 
         if neighbor_triangle_id != None:
@@ -420,7 +468,7 @@ class CDT:
             self.__update_neighbors(self.neighbors[neighbor_triangle_id][neighbor_triangle_edge_end_id], neighbor_triangle_id, t2_id)
             self.triangles[neighbor_triangle_id][neighbor_triangle_edge_end_id] = point_id
             self.neighbors[neighbor_triangle_id][neighbor_triangle_edge_end_id] = t2_id
-            self.neighbors[t2_id] = t2_adj
+            self.neighbors.append(t2_adj)
             self.triangles.append(t2)
 
             return [triangle_id, neighbor_triangle_id, t1_id, t2_id]
@@ -446,17 +494,17 @@ class CDT:
         t1 = [point_id, triangle[0], triangle[1]]
         t1_adj = [triangle_id, self.neighbors[triangle_id][0], t2_id]
         self.triangles.append(t1)
-        self.neighbors[t1_id] = t1_adj
+        self.neighbors.append(t1_adj)
         self.__update_neighbors(self.neighbors[triangle_id][0], triangle_id, t1_id)
         
         t2 = [point_id, triangle[1], triangle[2]]
         t2_adj = [t1_id, self.neighbors[triangle_id][1], triangle_id]
         self.triangles.append(t2)
-        self.neighbors[t2_id] = t2_adj
+        self.neighbors.append(t2_adj)
         self.__update_neighbors(self.neighbors[triangle_id][1], triangle_id, t2_id)
 
-        self.triangles[triangle_id] = [point_id, triangle[2], triangle[0]]
-        self.neighbors[triangle_id] = [t2_id, self.neighbors[triangle_id][2], t1_id]
+        self.triangles[triangle_id] = [triangle[0], point_id, triangle[2]]
+        self.neighbors[triangle_id] = [t1_id, t2_id, self.neighbors[triangle_id][2]]
 
         return [t1_id, t2_id, triangle_id]
 
@@ -511,9 +559,10 @@ class CDT:
         if triangle_id == -1:
             triangle_id = len(self.triangles)
             self.triangles.append(triangle)
+            self.neighbors.append([None, None, None])
         else:
             self.triangles[triangle_id] = triangle
-        self.neighbors[triangle_id] = [None, None, None]
+            self.neighbors[triangle_id] = [None, None, None]
         for neighbor_triangle_id, neighbor_triangle in enumerate(self.triangles):
             edge_pairs = [
                 [(0, 1), (0, 1)], [(0, 1), (1, 2)], [(0, 1), (2, 0)],
@@ -539,17 +588,20 @@ class CDT:
         point_id - int, required
             The id of the point which location is searching
         '''
+        for triangle_point_id in triangle:
+            if np.array_equal(self.points[triangle_point_id], self.points[point_id]):
+                return PointLocation.ON_VERTEX
         cross = np.array([])
         for i in range(3):
             a = self.points[triangle[i]]
             b = self.points[triangle[i + 1]] if i < 2 else self.points[triangle[0]]
             p = self.points[point_id]
             cross = np.append(cross, np.cross(p - a, b - a))
+        if np.any(np.abs(cross) <= self.epsilon):
+            return PointLocation.ON_EDGE
         if np.all(cross < 0):
             return PointLocation.INSIDE
-        elif np.any(cross > 0):
-                return PointLocation.OUTSIDE
-        return PointLocation.ON_EDGE
+        return PointLocation.OUTSIDE
 
     def __add_super_triangle(self) -> None:
         '''
@@ -569,7 +621,7 @@ class CDT:
         points_cnt = len(self.points)
         self.super_geometry = [[points_cnt - 3, points_cnt - 2, points_cnt - 1]]
         self.triangles.append(self.super_geometry[0])
-        self.neighbors[0] = [None, None, None]
+        self.neighbors.append([None, None, None])
 
     def __add_super_square(self) -> None:
         '''
@@ -588,9 +640,9 @@ class CDT:
         self.super_geometry = [[point_cnt - 4, point_cnt - 3, point_cnt - 1],
                                [point_cnt - 3, point_cnt - 2, point_cnt - 1]]
         self.triangles.append(copy.copy(self.super_geometry[0]))
-        self.neighbors[0] = [None, 1, None]
+        self.neighbors.append([None, 1, None])
         self.triangles.append(copy.copy(self.super_geometry[1]))
-        self.neighbors[1] = [None, None, 0]
+        self.neighbors.append([None, None, 0])
 
     def __add_super_geometry(self, super_geometry_type : SuperGeometryType) -> None:
         '''
@@ -621,6 +673,7 @@ class CDT:
 
             for triangle_id in reversed(triangles_to_remove):
                 self.triangles.pop(triangle_id)
+                self.__append_step("After removing super geometry triangle")
         self.points = np.delete(self.points, np.unique(points_to_remove), axis=0)
 
     def __remove_triangle(self, triangle_id : int) -> None:
@@ -631,12 +684,7 @@ class CDT:
             The id of the triangle that will be deleted
         '''
         for neighbor_triangle_id in self.neighbors[triangle_id]:
-            if neighbor_triangle_id == None:
-                continue
-            for i in range(3):
-                if self.neighbors[neighbor_triangle_id][i] == triangle_id:
-                    self.neighbors[neighbor_triangle_id][i] == None
-                    break
+            self.__update_neighbors(neighbor_triangle_id, triangle_id, None)
         for id in self.neighbors:
             for i in range(3):
                 if self.neighbors[id][i] != None and self.neighbors[id][i] > triangle_id:
@@ -680,6 +728,7 @@ class CDT:
                 to_remove.append(triangle_id)
         for triangle_id in reversed(to_remove):
             self.__remove_triangle(triangle_id)
+            self.__append_step("After removing outer triangle")
 
     def __normalize_input(self) -> None:
         '''
