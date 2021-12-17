@@ -21,8 +21,14 @@ class CDT:
     triangle_edge_ids = [(0, 1), (1, 2), (2, 0)]
 
     def __init__(self):
+        self.clear()
+
+    def clear(self) -> None:
+        '''
+        Clears all data after triangulation
+        '''
+        self.input_points = []
         self.points = []
-        self.points_in_triangulation = 0
         self.steps = []
         self.triangles = []
         self.constraints = []
@@ -36,10 +42,10 @@ class CDT:
         points - List[List[float]], required
             List of the 2-dimensional points where List[float] is just a pair of float numbers
         '''
-        if len(self.points) == 0:
-            self.points = np.array(points)
+        if len(self.input_points) == 0:
+            self.input_points = np.array(points)
         else:
-            self.points = np.concatenate((self.points, points), axis=0)
+            self.input_points = np.concatenate((self.input_points, points), axis=0)
 
     def add_constraint_segment(self, segment_constraint : List[List[float]]) -> None:
         '''
@@ -101,16 +107,17 @@ class CDT:
         '''
         Triangulates after all desired input is set
         '''
-        if len(self.points) < 3:
+        if len(self.input_points) < 3:
             return
         self.triangles = []
         self.neighbors = {}
         self.__normalize_input()
-        self.__add_super_geometry(SuperGeometryType.TRIANGLE)
+        self.__add_super_geometry(SuperGeometryType.SQUARE)
         self.__add_points_to_triangulation()
-        self.__process_constraints()
-        self.__mark_inner_outer_triangles()
-        self.__remove_outer_triangles()
+        if len(self.constraints) > 0:
+            self.__process_constraints()
+            self.__mark_inner_outer_triangles()
+            self.__remove_outer_triangles()
         self.__remove_super_geometry()
 
     def __append_step(self, step_name : str = "Undefined") -> None:
@@ -254,8 +261,7 @@ class CDT:
         '''
         Adds all free points to the triangulation
         '''
-        self.points_in_triangulation = len(self.points) - self.super_geometry_points_cnt
-        for point_id in range(self.points_in_triangulation):
+        for point_id in range(len(self.points) - self.super_geometry_points_cnt):
             self.__add_point_to_triangulation(point_id)
 
     def __add_point_to_triangulation(self, point_id : int) -> None:
@@ -685,7 +691,7 @@ class CDT:
         '''
         Optional step fits input points to the unit box
         '''
-        min_point = np.min(self.points, axis=0)
-        max_point = np.max(self.points, axis=0)
+        min_point = np.min(self.input_points, axis=0)
+        max_point = np.max(self.input_points, axis=0)
         delta = max_point - min_point
-        self.points = np.array([(point - min_point) / delta for point in self.points])
+        self.points = np.array([(point - min_point) / delta for point in self.input_points])
