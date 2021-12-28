@@ -691,7 +691,7 @@ class CDT:
         '''
         for neighbor_triangle_id in self.neighbors[triangle_id]:
             self.__update_neighbors(neighbor_triangle_id, triangle_id, None)
-        for id in self.neighbors:
+        for id in range(len(self.neighbors)):
             for i in range(3):
                 if self.neighbors[id][i] != None and self.neighbors[id][i] > triangle_id:
                     self.neighbors[id][i] -= 1
